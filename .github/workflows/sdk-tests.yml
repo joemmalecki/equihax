@@ -1,0 +1,42 @@
+name: SDK Tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'sdk/**'
+  pull_request:
+    paths:
+      - 'sdk/**'
+
+jobs:
+  test:
+    name: Test SDK
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.9', '3.10', '3.11']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        working-directory: sdk
+        run: |
+          pip install -e ".[dev]"
+
+      - name: Run tests
+        working-directory: sdk
+        run: |
+          pytest tests/ -v --tb=short
+
+      - name: Check test coverage
+        working-directory: sdk
+        run: |
+          pip install pytest-cov
+          pytest tests/ --cov=equihax --cov-report=term-missing --cov-fail-under=80
