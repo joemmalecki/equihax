@@ -21,7 +21,8 @@ def make_tenant_row(subdomain="acme", status="active"):
         "display_name": "Acme Corp",
         "tier": "pro",
         "status": status,
-        "created_at": "2024-01-01 00:00:00"
+        "created_at": "2024-01-01 00:00:00",
+        "updated_at": "2024-01-01 00:00:00",
     }
 
 
@@ -36,7 +37,8 @@ class TestListTenants:
         mock_db.query.return_value = []
         manager.list_tenants(status="suspended")
         mock_db.query.assert_called_once_with(
-            pytest.approx, ("suspended",)
+            "SELECT * FROM tenants WHERE status = %s ORDER BY created_at DESC",
+            ("suspended",)
         )
 
 
@@ -55,7 +57,7 @@ class TestGetTenant:
     def test_hyphen_subdomain_maps_to_underscore_schema(self, manager, mock_db):
         mock_db.query_one.return_value = make_tenant_row("coca-cola")
         tenant = manager.get_tenant("coca-cola")
-        assert tenant.schema_name == "coca-cola"  # stored as-is from DB
+        assert tenant.schema_name == "coca_cola"
 
 
 class TestProvisionTenant:
@@ -87,11 +89,11 @@ class TestProvisionTenant:
         create_call = mock_db.execute.call_args_list[0]
         assert "coca_cola" in create_call[0][0]
 
-    def test_grants_db_permissions(self, manager, mock_db):
+    def test_registers_tenant_in_registry(self, manager, mock_db):
         mock_db.query_one.side_effect = [None, make_tenant_row()]
         manager.provision_tenant("acme", "Acme Corp")
         calls = [str(c) for c in mock_db.execute.call_args_list]
-        assert any("GRANT" in c for c in calls)
+        assert any("INSERT" in c for c in calls)
 
 
 class TestDeprovisionTenant:
@@ -101,7 +103,6 @@ class TestDeprovisionTenant:
         calls = [str(c) for c in mock_db.execute.call_args_list]
         assert any("DROP DATABASE" in c for c in calls)
         assert any("DELETE" in c for c in calls)
-        assert any("REVOKE" in c for c in calls)
 
     def test_raises_if_tenant_not_found(self, manager, mock_db):
         mock_db.query_one.return_value = None

@@ -1,6 +1,6 @@
 from .db import DatabaseConnection
 from .tenants import TenantManager, Tenant
-from .environments import EnvironmentManager, Environment
+from .environments import EnvironmentManager, Environment, TENANT_CAPACITY_THRESHOLD
 from typing import Optional
 
 
@@ -58,23 +58,36 @@ class EquihaxClient:
         capacity = self.get_capacity()
 
         if capacity["is_full"]:
+            active = self._env_manager.get_active_environment()
+            if active:
+                raise CapacityError(
+                    f"Environment '{self._environment.environment_id}' is full "
+                    f"({capacity['tenant_count']}/{capacity['threshold']} tenants). "
+                    f"Switch to EquihaxClient(environment_id='{active.environment_id}') to provision new tenants."
+                )
             raise CapacityError(
                 f"Environment '{self._environment.environment_id}' is full "
                 f"({capacity['tenant_count']}/{capacity['threshold']} tenants). "
-                "Call deploy_environment() to provision a new environment."
+                "All environments are at capacity — call deploy_environment() to provision a new one."
             )
 
         if capacity["warning"]:
             print(f"[WARN] {capacity['warning']}")
 
         tenant = self._tenant_manager.provision_tenant(subdomain, display_name, tier)
-        self._env_manager.increment_tenant_count(self._environment.environment_id)
+        try:
+            self._env_manager.increment_tenant_count(self._environment.environment_id)
+        except Exception as e:
+            print(f"[WARN] Tenant provisioned but failed to update environment count: {e}")
         return tenant
 
     def deprovision_tenant(self, subdomain: str):
         """Permanently remove a tenant and drop their schema."""
         self._tenant_manager.deprovision_tenant(subdomain)
-        self._env_manager.decrement_tenant_count(self._environment.environment_id)
+        try:
+            self._env_manager.decrement_tenant_count(self._environment.environment_id)
+        except Exception as e:
+            print(f"[WARN] Tenant deprovisioned but failed to update environment count: {e}")
 
     def suspend_tenant(self, subdomain: str):
         """Suspend a tenant without deleting their data."""
@@ -101,7 +114,6 @@ class EquihaxClient:
         Returns current tenant count and capacity status for this environment.
         Emits a warning when within 10 tenants of the threshold.
         """
-        from .environments import TENANT_CAPACITY_THRESHOLD
         count = self._tenant_manager.get_count()
         remaining = TENANT_CAPACITY_THRESHOLD - count
         is_full = count >= TENANT_CAPACITY_THRESHOLD

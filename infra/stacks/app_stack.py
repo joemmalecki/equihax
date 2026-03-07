@@ -1,13 +1,13 @@
+from typing import Optional
 from aws_cdk import (
     Stack,
     Duration,
     aws_ec2 as ec2,
     aws_ecs as ecs,
-    aws_ecs_patterns as ecs_patterns,
     aws_elasticloadbalancingv2 as elbv2,
     aws_certificatemanager as acm,
-    aws_route53 as route53,
     aws_secretsmanager as secretsmanager,
+    aws_ssm as ssm,
     aws_logs as logs,
 )
 from constructs import Construct
@@ -18,48 +18,27 @@ class AppStack(Stack):
                  vpc: ec2.Vpc,
                  db_secret: secretsmanager.ISecret,
                  db_endpoint: str,
+                 environment_id: str,
+                 alb_sg: ec2.SecurityGroup,
+                 ecs_sg: ec2.SecurityGroup,
+                 certificate: Optional[acm.ICertificate] = None,
                  **kwargs):
         super().__init__(scope, id, **kwargs)
+
+        if certificate is None:
+            cert_arn = ssm.StringParameter.value_from_lookup(
+                self, "/equihax/certificate_arn"
+            )
+            certificate = acm.Certificate.from_certificate_arn(
+                self, "WildcardCert", cert_arn
+            )
 
         # ECS Cluster
         cluster = ecs.Cluster(
             self, "EquihaxCluster",
             vpc=vpc,
-            cluster_name="equihax"
+            cluster_name=f"equihax-{environment_id}"
         )
-
-        # Lookup hosted zone for equihax.net
-        hosted_zone = route53.HostedZone.from_lookup(
-            self, "EquihaxZone",
-            domain_name="equihax.net"
-        )
-
-        # Wildcard SSL cert for *.equihax.net
-        certificate = acm.Certificate(
-            self, "WildcardCert",
-            domain_name="*.equihax.net",
-            subject_alternative_names=["equihax.net"],
-            validation=acm.CertificateValidation.from_dns(hosted_zone)
-        )
-
-        # ALB Security Group
-        alb_sg = ec2.SecurityGroup(
-            self, "AlbSg",
-            vpc=vpc,
-            description="ALB security group",
-            allow_all_outbound=True
-        )
-        alb_sg.add_ingress_rule(ec2.Peer.any_ipv4(), ec2.Port.tcp(80))
-        alb_sg.add_ingress_rule(ec2.Peer.any_ipv4(), ec2.Port.tcp(443))
-
-        # ECS Security Group
-        ecs_sg = ec2.SecurityGroup(
-            self, "EcsSg",
-            vpc=vpc,
-            description="ECS Fargate security group",
-            allow_all_outbound=True
-        )
-        ecs_sg.add_ingress_rule(alb_sg, ec2.Port.tcp(80))
 
         # Application Load Balancer
         self.alb = elbv2.ApplicationLoadBalancer(
@@ -108,15 +87,11 @@ class AppStack(Stack):
         # nginx container (public facing)
         nginx_container = task_def.add_container(
             "nginx",
-            image=ecs.ContainerImage.from_asset("../app/nginx"),
+            image=ecs.ContainerImage.from_asset("../app", file="nginx/Dockerfile"),
             logging=ecs.LogDrivers.aws_logs(
                 stream_prefix="nginx",
                 log_group=logs.LogGroup(self, "NginxLogs")
             ),
-            environment={
-                "APACHE_HOST": "localhost",
-                "APACHE_PORT": "8080"
-            }
         )
         nginx_container.add_port_mappings(
             ecs.PortMapping(container_port=80)
@@ -125,7 +100,7 @@ class AppStack(Stack):
         # Apache + PHP container (sidecar)
         apache_container = task_def.add_container(
             "apache",
-            image=ecs.ContainerImage.from_asset("../app/apache"),
+            image=ecs.ContainerImage.from_asset("../app", file="apache/Dockerfile"),
             logging=ecs.LogDrivers.aws_logs(
                 stream_prefix="apache",
                 log_group=logs.LogGroup(self, "ApacheLogs")
@@ -136,7 +111,6 @@ class AppStack(Stack):
             },
             environment={
                 "DB_HOST": db_endpoint,
-                "DB_NAME": "tenants_registry"
             }
         )
         apache_container.add_port_mappings(

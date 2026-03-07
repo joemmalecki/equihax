@@ -6,7 +6,6 @@ from typing import Optional
 from .db import DatabaseConnection
 
 TENANT_CAPACITY_THRESHOLD = 100
-TENANT_HARD_LIMIT = 110  # auto-flag starts at 100, hard stop at 110
 
 
 @dataclass
@@ -28,12 +27,29 @@ class EnvironmentManager:
 
     # Central registry of all environments — stored in a dedicated
     # DynamoDB table so the SDK can discover them without hardcoding.
-    REGISTRY_TABLE = "equihax_environments"
+    ENVIRONMENTS_TABLE = "equihax_environments"
 
     def __init__(self, region: str = "us-east-1"):
         self.region = region
         self._dynamodb = boto3.resource("dynamodb", region_name=region)
-        self._table = self._dynamodb.Table(self.REGISTRY_TABLE)
+        self._table = self._dynamodb.Table(self.ENVIRONMENTS_TABLE)
+        self._ensure_registry_table()
+
+    def _ensure_registry_table(self):
+        """Creates the equihax_environments DynamoDB table if it doesn't exist."""
+        client = boto3.client("dynamodb", region_name=self.region)
+        try:
+            client.describe_table(TableName=self.ENVIRONMENTS_TABLE)
+        except client.exceptions.ResourceNotFoundException:
+            print(f"[INFO] Creating DynamoDB table '{self.ENVIRONMENTS_TABLE}'...")
+            self._dynamodb.create_table(
+                TableName=self.ENVIRONMENTS_TABLE,
+                KeySchema=[{"AttributeName": "environment_id", "KeyType": "HASH"}],
+                AttributeDefinitions=[{"AttributeName": "environment_id", "AttributeType": "S"}],
+                BillingMode="PAY_PER_REQUEST",
+            )
+            self._table.wait_until_exists()
+            print(f"[INFO] DynamoDB table '{self.ENVIRONMENTS_TABLE}' ready.")
 
     def list_environments(self) -> list[Environment]:
         response = self._table.scan()
@@ -47,7 +63,8 @@ class EnvironmentManager:
     def get_active_environment(self) -> Optional[Environment]:
         """
         Returns the environment that should receive new tenants.
-        Raises CapacityWarning if approaching threshold.
+        Prints a warning if the environment is approaching capacity.
+        Returns None if all environments are full.
         """
         envs = self.list_environments()
         active = [e for e in envs if e.status == "active"]
@@ -76,7 +93,8 @@ class EnvironmentManager:
         self._table.update_item(
             Key={"environment_id": environment_id},
             UpdateExpression="SET tenant_count = tenant_count - :val",
-            ExpressionAttributeValues={":val": 1}
+            ConditionExpression="tenant_count > :zero",
+            ExpressionAttributeValues={":val": 1, ":zero": 0}
         )
 
     def deploy_environment(self, environment_id: str, account: str) -> Environment:
@@ -84,13 +102,24 @@ class EnvironmentManager:
         Manually triggered after auto-flag warning.
         Runs CDK deploy for a new environment and registers it.
         """
+        if self.get_environment(environment_id):
+            raise ValueError(
+                f"Environment '{environment_id}' already exists. "
+                "Use a new environment_id."
+            )
+
         print(f"[INFO] Deploying new environment '{environment_id}'...")
+
+        existing = self.list_environments()
+        deploy_dns = "true" if not existing else "false"
 
         result = subprocess.run(
             [
                 "cdk", "deploy", "--all",
                 "--context", f"account={account}",
                 "--context", f"environment_id={environment_id}",
+                "--context", f"region={self.region}",
+                "--context", f"deploy_dns={deploy_dns}",
                 "--require-approval", "never"
             ],
             cwd="../infra",
@@ -104,7 +133,6 @@ class EnvironmentManager:
         # Parse CDK outputs to get the new RDS endpoint
         outputs = self._parse_cdk_outputs(environment_id)
 
-        # Register the new environment in DynamoDB
         env = Environment(
             environment_id=environment_id,
             db_host=outputs["db_endpoint"],
@@ -113,6 +141,16 @@ class EnvironmentManager:
             tenant_count=0,
             status="active"
         )
+
+        # Bootstrap the tenants_registry database before registering
+        db = DatabaseConnection(
+            secret_name=env.secret_name,
+            host=env.db_host,
+            region=self.region,
+        )
+        db.bootstrap_registry()
+
+        # Only register in DynamoDB after bootstrap succeeds
         self._table.put_item(Item=self._from_environment(env))
 
         print(f"[INFO] Environment '{environment_id}' deployed and registered.")

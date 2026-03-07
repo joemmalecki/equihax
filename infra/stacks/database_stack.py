@@ -2,6 +2,7 @@ from aws_cdk import (
     Stack,
     Duration,
     RemovalPolicy,
+    CfnOutput,
     aws_ec2 as ec2,
     aws_rds as rds,
     aws_secretsmanager as secretsmanager,
@@ -10,20 +11,8 @@ from constructs import Construct
 
 
 class DatabaseStack(Stack):
-    def __init__(self, scope: Construct, id: str, vpc: ec2.Vpc, **kwargs):
+    def __init__(self, scope: Construct, id: str, vpc: ec2.Vpc, rds_sg: ec2.SecurityGroup, environment_id: str, **kwargs):
         super().__init__(scope, id, **kwargs)
-
-        # Security group for RDS
-        rds_sg = ec2.SecurityGroup(
-            self, "RdsSg",
-            vpc=vpc,
-            description="Allow MySQL from within VPC",
-            allow_all_outbound=False
-        )
-        rds_sg.add_ingress_rule(
-            ec2.Peer.ipv4(vpc.vpc_cidr_block),
-            ec2.Port.tcp(3306)
-        )
 
         # RDS MariaDB instance
         self.db_instance = rds.DatabaseInstance(
@@ -49,10 +38,12 @@ class DatabaseStack(Stack):
             backup_retention=Duration.days(7),
             credentials=rds.Credentials.from_generated_secret(
                 "httpdclient",
-                secret_name="equihax/db/credentials"
+                secret_name=f"equihax/{environment_id}/db/credentials"
             )
         )
 
         # Expose secret and endpoint for use in app stack
         self.db_secret = self.db_instance.secret
         self.db_endpoint = self.db_instance.db_instance_endpoint_address
+
+        CfnOutput(self, "DbEndpoint", value=self.db_endpoint)

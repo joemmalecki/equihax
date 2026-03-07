@@ -1,41 +1,27 @@
 <?php
-// api/validate_tenant.php
-// Called internally by nginx auth_request before serving any frontend file.
-// Returns 200 if tenant is valid and active, 401 otherwise.
+$tenant = $_SERVER['HTTP_X_TENANT_ID'] ?? null;
 
-$host     = getenv('DB_HOST');
-$username = getenv('DB_USERNAME');
-$password = getenv('DB_PASSWORD');
-
-$subdomain = $_SERVER['HTTP_X_TENANT_ID'] ?? null;
-
-if (!$subdomain) {
+if (!$tenant) {
     http_response_code(401);
     exit;
 }
 
-$subdomain = strtolower($subdomain);
-$subdomain = str_replace('-', '_', $subdomain);
-$subdomain = preg_replace('/[^a-z0-9_-]/', '', $subdomain);
+$host = 'localhost';
+$username = 'httpdclient';       // Database username
+$password = 'mypassword';           // Database password
 
 try {
-    $registry = new PDO(
-        "mysql:host=$host;dbname=tenants_registry;charset=utf8",
-        $username,
-        $password
-    );
-    $stmt = $registry->prepare(
-        "SELECT id FROM tenants WHERE subdomain = ? AND status = 'active'"
-    );
-    $stmt->execute([$subdomain]);
+    $registry = new PDO("mysql:host=$host;dbname=tenants_registry", $username, $password);
+    $stmt = $registry->prepare("SELECT id FROM tenants WHERE subdomain = ? AND status = 'active'");
+    $stmt->execute([$tenant]);
 
-    if ($stmt->fetch()) {
-        http_response_code(200);
-    } else {
+    if (!$stmt->fetch()) {
         http_response_code(401);
+        exit;
     }
-} catch (Exception $e) {
+
+    http_response_code(200);
+} catch (PDOException $e) {
     http_response_code(500);
 }
 exit;
-?>

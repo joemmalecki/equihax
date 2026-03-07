@@ -1,3 +1,4 @@
+import os
 import pymysql
 import boto3
 import json
@@ -20,16 +21,41 @@ class DatabaseConnection:
         response = client.get_secret_value(SecretId=secret_name)
         return json.loads(response["SecretString"])
 
-    def get_connection(self, database: str = "tenants_registry") -> pymysql.Connection:
-        return pymysql.connect(
+    def get_connection(self, database: Optional[str] = "tenants_registry") -> pymysql.Connection:
+        kwargs = dict(
             host=self.host,
             user=self._credentials["username"],
             password=self._credentials["password"],
-            database=database,
             charset="utf8mb4",
             cursorclass=pymysql.cursors.DictCursor,
-            autocommit=False
+            autocommit=False,
         )
+        if database is not None:
+            kwargs["database"] = database
+        return pymysql.connect(**kwargs)
+
+    def bootstrap_registry(self):
+        """
+        Creates the tenants_registry database and tenants table on a fresh RDS instance.
+        Connects without selecting a database so it can run CREATE DATABASE safely.
+        """
+        migrations_dir = os.path.join(os.path.dirname(__file__), "migrations")
+        sql_path = os.path.join(migrations_dir, "registry_setup.sql")
+
+        with open(sql_path, "r") as f:
+            sql = f.read()
+
+        statements = [s.strip() for s in sql.split(";") if s.strip() and not s.strip().startswith("--")]
+        conn = self.get_connection(database=None)
+        try:
+            with conn.cursor() as cursor:
+                for statement in statements:
+                    cursor.execute(statement)
+            conn.commit()
+        finally:
+            conn.close()
+
+        print("[INFO] tenants_registry bootstrapped")
 
     def execute(self, sql: str, args: Optional[tuple] = None, database: str = "tenants_registry"):
         """Execute a single statement and return affected rows."""

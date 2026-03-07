@@ -1,4 +1,5 @@
 import re
+import os
 from dataclasses import dataclass
 from typing import Optional
 from .db import DatabaseConnection
@@ -18,6 +19,7 @@ class Tenant:
     tier: str
     status: str
     created_at: str
+    updated_at: str
 
 
 class TenantManager:
@@ -51,7 +53,6 @@ class TenantManager:
         2. Create schema
         3. Run migrations
         4. Register in tenants_registry
-        5. Grant DB permissions
         """
         self._validate_subdomain(subdomain)
 
@@ -75,10 +76,6 @@ class TenantManager:
             """,
             (schema_name, subdomain, display_name, tier)
         )
-
-        # 4. Grant app user access to new schema
-        self.db.execute(f"GRANT ALL ON `{schema_name}`.* TO 'httpdclient'@'%'")
-        self.db.execute("FLUSH PRIVILEGES")
 
         print(f"[INFO] Tenant '{subdomain}' provisioned at {subdomain}.equihax.net")
         return self.get_tenant(subdomain)
@@ -114,9 +111,6 @@ class TenantManager:
             (subdomain,)
         )
 
-        # Revoke permissions
-        self.db.execute(f"REVOKE ALL ON `{schema_name}`.* FROM 'httpdclient'@'%'")
-
         # Drop schema
         self.db.execute(f"DROP DATABASE `{schema_name}`")
 
@@ -128,12 +122,20 @@ class TenantManager:
 
     def _run_migrations(self, schema_name: str):
         """
-        Placeholder — integrate Flyway or run SQL migration files here.
-        Called after schema creation to set up initial table structure.
+        Runs tenant_setup.sql against the newly created tenant schema
+        to set up tables and seed initial data.
         """
-        # Example: run all .sql files in /migrations against the new schema
-        # subprocess.run(["flyway", "-schemas=" + schema_name, "migrate"])
-        print(f"[INFO] Migrations applied to '{schema_name}' (placeholder)")
+        migrations_dir = os.path.join(os.path.dirname(__file__), "migrations")
+        sql_path = os.path.join(migrations_dir, "tenant_setup.sql")
+
+        with open(sql_path, "r") as f:
+            sql = f.read()
+
+        statements = [s.strip() for s in sql.split(";") if s.strip() and not s.strip().startswith("--")]
+        for statement in statements:
+            self.db.execute(statement, database=schema_name)
+
+        print(f"[INFO] Migrations applied to '{schema_name}'")
 
     def _validate_subdomain(self, subdomain: str):
         if subdomain in RESERVED_SUBDOMAINS:
@@ -161,5 +163,6 @@ class TenantManager:
             display_name=row["display_name"],
             tier=row["tier"],
             status=row["status"],
-            created_at=str(row["created_at"])
+            created_at=str(row["created_at"]),
+            updated_at=str(row["updated_at"]),
         )

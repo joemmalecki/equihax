@@ -22,3 +22,4 @@ infra/.cdk.staging/
 *.pem
 *.key
 .env.local
+myenv/
