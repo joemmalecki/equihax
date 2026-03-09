@@ -6,9 +6,9 @@ if (!$tenant) {
     exit;
 }
 
-$host = 'localhost';
-$username = 'httpdclient';       // Database username
-$password = 'mypassword';           // Database password
+$host = $_ENV['DB_HOST'] ?? getenv('DB_HOST');
+$username = $_ENV['DB_USERNAME'] ?? getenv('DB_USERNAME');
+$password = $_ENV['DB_PASSWORD'] ?? getenv('DB_PASSWORD');
 
 try {
     $registry = new PDO("mysql:host=$host;dbname=tenants_registry", $username, $password);

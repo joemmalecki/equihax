@@ -95,6 +95,13 @@ class TestProvisionTenant:
         calls = [str(c) for c in mock_db.execute.call_args_list]
         assert any("INSERT" in c for c in calls)
 
+    def test_runs_migrations_via_execute_script(self, manager, mock_db):
+        mock_db.query_one.side_effect = [None, make_tenant_row()]
+        manager.provision_tenant("acme", "Acme Corp")
+        mock_db.execute_script.assert_called_once()
+        call_kwargs = mock_db.execute_script.call_args[1]
+        assert call_kwargs["database"] == "acme"
+
 
 class TestDeprovisionTenant:
     def test_deprovisions_successfully(self, manager, mock_db):
@@ -108,6 +115,19 @@ class TestDeprovisionTenant:
         mock_db.query_one.return_value = None
         with pytest.raises(ValueError, match="not found"):
             manager.deprovision_tenant("ghost")
+
+
+class TestReactivateTenant:
+    def test_reactivates_suspended_tenant(self, manager, mock_db):
+        mock_db.query_one.return_value = make_tenant_row(status="suspended")
+        manager.reactivate_tenant("acme")
+        calls = [str(c) for c in mock_db.execute.call_args_list]
+        assert any("active" in c for c in calls)
+
+    def test_raises_if_tenant_not_found(self, manager, mock_db):
+        mock_db.query_one.return_value = None
+        with pytest.raises(ValueError, match="not found"):
+            manager.reactivate_tenant("ghost")
 
 
 class TestSuspendTenant:

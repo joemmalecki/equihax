@@ -1,0 +1,14 @@
+{
+  "availability-zones:account=886375649266:region=us-east-1": [
+    "us-east-1a",
+    "us-east-1b",
+    "us-east-1c",
+    "us-east-1d",
+    "us-east-1e",
+    "us-east-1f"
+  ],
+  "hosted-zone:account=886375649266:domainName=equihax.net:region=us-east-1": {
+    "Id": "/hostedzone/Z09820383IXJMM6UJN6CV",
+    "Name": "equihax.net."
+  }
+}

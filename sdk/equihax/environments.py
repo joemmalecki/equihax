@@ -3,7 +3,8 @@ import boto3
 import json
 from dataclasses import dataclass
 from typing import Optional
-from .db import DatabaseConnection
+import socket
+from .db import DatabaseConnection, _BastionTunnel
 
 TENANT_CAPACITY_THRESHOLD = 100
 
@@ -120,10 +121,11 @@ class EnvironmentManager:
                 "--context", f"environment_id={environment_id}",
                 "--context", f"region={self.region}",
                 "--context", f"deploy_dns={deploy_dns}",
+                "--outputs-file", "cdk.out/outputs.json",
                 "--require-approval", "never"
             ],
             cwd="../infra",
-            capture_output=True,
+            capture_output=False,
             text=True
         )
 
@@ -142,13 +144,34 @@ class EnvironmentManager:
             status="active"
         )
 
-        # Bootstrap the tenants_registry database before registering
-        db = DatabaseConnection(
-            secret_name=env.secret_name,
-            host=env.db_host,
-            region=self.region,
-        )
-        db.bootstrap_registry()
+        # Bootstrap tenants_registry via bastion tunnel (RDS is in private subnet)
+        tunnel = None
+        try:
+            try:
+                sock = socket.create_connection((env.db_host, 3306), timeout=2.0)
+                sock.close()
+                db_host = env.db_host
+                db_port = 3306
+            except OSError:
+                tunnel = _BastionTunnel(
+                    environment_id=environment_id,
+                    db_host=env.db_host,
+                    region=self.region,
+                )
+                tunnel.start()
+                db_host = "127.0.0.1"
+                db_port = _BastionTunnel.LOCAL_PORT
+
+            db = DatabaseConnection(
+                secret_name=env.secret_name,
+                host=db_host,
+                port=db_port,
+                region=self.region,
+            )
+            db.bootstrap_registry()
+        finally:
+            if tunnel:
+                tunnel.stop()
 
         # Only register in DynamoDB after bootstrap succeeds
         self._table.put_item(Item=self._from_environment(env))

@@ -11,7 +11,8 @@ from constructs import Construct
 
 
 class DatabaseStack(Stack):
-    def __init__(self, scope: Construct, id: str, vpc: ec2.Vpc, rds_sg: ec2.SecurityGroup, environment_id: str, **kwargs):
+    def __init__(self, scope: Construct, id: str, vpc: ec2.Vpc, rds_sg: ec2.SecurityGroup,
+                 bastion_sg: ec2.SecurityGroup, environment_id: str, **kwargs):
         super().__init__(scope, id, **kwargs)
 
         # RDS MariaDB instance
@@ -41,6 +42,9 @@ class DatabaseStack(Stack):
                 secret_name=f"equihax/{environment_id}/db/credentials"
             )
         )
+
+        # Allow bastion to reach RDS for admin/SDK operations
+        rds_sg.add_ingress_rule(bastion_sg, ec2.Port.tcp(3306))
 
         # Expose secret and endpoint for use in app stack
         self.db_secret = self.db_instance.secret

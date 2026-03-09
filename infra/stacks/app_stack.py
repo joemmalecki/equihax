@@ -4,6 +4,7 @@ from aws_cdk import (
     Duration,
     aws_ec2 as ec2,
     aws_ecs as ecs,
+    aws_ecr_assets as ecr_assets,
     aws_elasticloadbalancingv2 as elbv2,
     aws_certificatemanager as acm,
     aws_secretsmanager as secretsmanager,
@@ -87,7 +88,7 @@ class AppStack(Stack):
         # nginx container (public facing)
         nginx_container = task_def.add_container(
             "nginx",
-            image=ecs.ContainerImage.from_asset("../app", file="nginx/Dockerfile"),
+            image=ecs.ContainerImage.from_asset("../app", file="nginx/Dockerfile", platform=ecr_assets.Platform.LINUX_AMD64),
             logging=ecs.LogDrivers.aws_logs(
                 stream_prefix="nginx",
                 log_group=logs.LogGroup(self, "NginxLogs")
@@ -100,7 +101,7 @@ class AppStack(Stack):
         # Apache + PHP container (sidecar)
         apache_container = task_def.add_container(
             "apache",
-            image=ecs.ContainerImage.from_asset("../app", file="apache/Dockerfile"),
+            image=ecs.ContainerImage.from_asset("../app", file="apache/Dockerfile", platform=ecr_assets.Platform.LINUX_AMD64),
             logging=ecs.LogDrivers.aws_logs(
                 stream_prefix="apache",
                 log_group=logs.LogGroup(self, "ApacheLogs")
@@ -138,8 +139,8 @@ class AppStack(Stack):
             protocol=elbv2.ApplicationProtocol.HTTP,
             targets=[service],
             health_check=elbv2.HealthCheck(
-                path="/",
-                healthy_http_codes="200,301,302,404"
+                path="/health",
+                healthy_http_codes="200"
             )
         )
 

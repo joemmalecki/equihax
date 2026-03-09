@@ -6,9 +6,9 @@
  * @return PDO
  */
 function getDatabaseConnection() {
-    $host = 'localhost';      // Database host (change to your RDS endpoint in production)
-    $username = 'httpdclient';       // Database username
-    $password = 'mypassword';           // Database password
+    $host = $_ENV['DB_HOST'] ?? getenv('DB_HOST');
+    $username = $_ENV['DB_USERNAME'] ?? getenv('DB_USERNAME');
+    $password = $_ENV['DB_PASSWORD'] ?? getenv('DB_PASSWORD');
 
     $tenant = $_SERVER['HTTP_X_TENANT_ID'] ?? null;
 
@@ -18,7 +18,6 @@ function getDatabaseConnection() {
     }
     
     $tenant = preg_replace('/[^a-z0-9_-]/', '', strtolower($tenant));
-    $tenant = str_replace('-', '_', $tenant);
 
     // 4. Validate against your tenants registry
     $registry = new PDO("mysql:host=$host;dbname=tenants_registry", $username, $password);

@@ -16,11 +16,15 @@ env = cdk.Environment(
     region=app.node.try_get_context("region") or "us-east-1"
 )
 
-network = NetworkStack(app, f"EquihaxNetwork-{environment_id}", env=env)
+network = NetworkStack(app, f"EquihaxNetwork-{environment_id}",
+    environment_id=environment_id,
+    env=env
+)
 
 database = DatabaseStack(app, f"EquihaxDatabase-{environment_id}",
     vpc=network.vpc,
     rds_sg=network.rds_sg,
+    bastion_sg=network.bastion_sg,
     environment_id=environment_id,
     env=env
 )

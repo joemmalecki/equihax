@@ -124,6 +124,7 @@ class TenantManager:
         """
         Runs tenant_setup.sql against the newly created tenant schema
         to set up tables and seed initial data.
+        Uses a single connection so all statements share the same database context.
         """
         migrations_dir = os.path.join(os.path.dirname(__file__), "migrations")
         sql_path = os.path.join(migrations_dir, "tenant_setup.sql")
@@ -131,10 +132,7 @@ class TenantManager:
         with open(sql_path, "r") as f:
             sql = f.read()
 
-        statements = [s.strip() for s in sql.split(";") if s.strip() and not s.strip().startswith("--")]
-        for statement in statements:
-            self.db.execute(statement, database=schema_name)
-
+        self.db.execute_script(sql, database=schema_name)
         print(f"[INFO] Migrations applied to '{schema_name}'")
 
     def _validate_subdomain(self, subdomain: str):
